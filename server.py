@@ -108,7 +108,7 @@ def response_error(msg: str, code: int = 400) -> str:
     """Return JSON string for error response."""
     return json.dumps({"ok": False, "error": {"message": msg, "code": code}}, indent=2)
 
-async def _fetch_one_async(query: dict, projection: dict) -> str:          #  Point of concern
+async def _fetch_one_async(query: dict, projection: dict,multiple:bool=False) -> str:          #  Point of concern
     """
     Consistent async DB fetch and error handling.
     Returns JSON string response.
@@ -117,7 +117,26 @@ async def _fetch_one_async(query: dict, projection: dict) -> str:          #  Po
         _, _, col = await get_mongodb_client()
         logger.info(f"Executing query: {json.dumps(query)}")
         
-        result = await col.find_one(query, projection)
+        if multiple:
+            cursor =col.find(query,projection)
+            results=[]
+            async for doc in cursor:
+                if "_id" in doc:
+                    doc.pop("_id")
+                if "_class" in doc:
+                    doc.pop("_class")
+                results.append(doc)
+            if not results:
+                logger.warning(f"No documets found for query:{json.dumps(query)}")
+                return response_error("No matching documents found", code=404)
+            logger.info(f"Found {len(results)} documents")
+            return response_ok({
+                "document":results,
+                "count":len(results),
+                "query":query
+            })
+        else:
+            result=await col.find_one(query,projection)
         
         if not result:
             logger.warning(f"No document found for query: {json.dumps(query)}")
@@ -134,98 +153,74 @@ async def _fetch_one_async(query: dict, projection: dict) -> str:          #  Po
     except Exception as exc:
         logger.exception("DB query failed")
         return response_error(f"DB query failed: {str(exc)}", code=500)
-# --- MCP Resources ---
-@mcp.resource("resource://flight-schema")
-def flight_schema()-> str:
-    """Returns a desctiption of the flight MongoDB schema for context."""
-    return """
-        'carrier': 'flightLegState.carrier',
-        'date_of_origin': 'flightLegState.dateOfOrigin',
-        'flight_number': 'flightLegState.flightNumber',
-        'suffix': 'flightLegState.suffix',
-        'sequence_number': 'flightLegState.seqNumber',
-        'origin': 'flightLegState.startStation',
-        'destination': 'flightLegState.endStation',
-        'scheduled_departure': 'flightLegState.scheduledStartTime',
-        'scheduled_arrival': 'flightLegState.scheduledEndTime',
-        'end_terminal': 'flightLegState.endTerminal',
-        'operational_status': 'flightLegState.operationalStatus',
-        'flight_status': 'flightLegState.flightStatus',
-        'start_country': 'flightLegState.startCountry',
-        'end_country': 'flightLegState.endCountry',
-        'aircraft_registration': 'flightLegState.equipment.aircraftRegistration',
-        'aircraft_type': 'flightLegState.equipment.assignedAircraftTypeIATA',
-        'start_gate': 'flightLegState.startGate',
-        'end_gate': 'flightLegState.endGate',
-        'start_terminal': 'flightLegState.startTerminal',
-        'delay_total': 'flightLegState.delays.total',
-        'flight_type': 'flightLegState.flightType',
-        'operations': 'flightLegState.operation',
-        'estimated_times': 'flightLegState.operation.estimatedTimes',
-        'off_block_time': 'flightLegState.operation.estimatedTimes.offBlock',
-        'in_block_time': 'flightLegState.operation.estimatedTimes.inBlock',
-        'takeoff_time': 'flightLegState.operation.estimatedTimes.takeoffTime',
-        'landing_time': 'flightLegState.operation.estimatedTimes.landingTime',
-        'actual_times': 'flightLegState.operation.actualTimes',
-        'actual_off_block_time': 'flightLegState.operation.actualTimes.offBlock',
-        'actual_in_block_time': 'flightLegState.operation.actualTimes.inBlock',
-        'actual_takeoff_time': 'flightLegState.operation.actualTimes.takeoffTime',
-        'actual_landing_time': 'flightLegState.operation.actualTimes.landingTime',
-        'door_close_time': 'flightLegState.operation.estimatedTimes.doorClose',
-        'fuel':'flightLegState.operation.fuel',
-        'fuel_off_block':'flightLegState.operation.fuel.offBlock',
-        'fuel_takeoff':'flightLegState.operation.fuel.takeoff',
-        'fuel_landing':'flightLegState.operation.fuel.landing',
-        'fuel_in_block':'flightLegState.operation.fuel.inBlock',
-        'autoland':'flightLegState.operation.autoland',
-        'flight_plan':'flightLegState.operation.flightPlan',
-        'estimated_Elapsed_time':'flightLegState.operation.flightPlan.estimatedElapsedTime',
-        'actual_Takeoff_time':'flightLegState.operation.flightPlan.acTakeoffWeight',
-        'flight_plan_takeoff_fuel':'flightLegState.operation.flightPlan.takeoffFuel',
-        'flight_plan_landing_fuel':'flightLegState.operation.flightPlan.landingFuel',
-        'flight_plan_hold_fuel':'flightLegState.operation.flightPlan.holdFuel',
-        'flight_plan_hold_time':'flightLegState.operation.flightPlan.holdTime',
-        'flight_plan_route_distance':'flightLegState.operation.flightPlan.routeDistance',
-        'start_country':'flightLegState.startCountry',
-        'end_country':'flightLegState.endCountry',
-        'ICAO_start_station':'flightLegState.startStationICAO',
-        'ICAO_end_station':'flightLegState.endStationICAO',
-        'Flight_otp_achieved':'flightLegState.isOTPAchieved',
-        'Flight_otp_considered':'flightLegState.isOTPConsidered',
-        'Flight_otp_status':'flightLegState.isOTPFlight',
-        'Flight_type':'flightLegState.flightType',
-        'scheduled_block_time':'flightLegState.blockTimeSch',
-        'acutal_block_time':'flightLegState.blockTimeActual',
-        'start_time_offset':'flightLegState.startTimeOffset',
-        'end_time_offset':'flightLegState.endTimeOffset',
-        'start_country':'flightLegState.startCountry',
-        'end_country':'flightLegState.endCountry',
-        'ICAO_start_station':'flightLegState.startStationICAO',
-        'ICAO_end_station':'flightLegState.endStationICAO',
-        'Flight_otp_achieved':'flightLegState.isOTPAchieved',
-        'Flight_otp_considered':'flightLegState.isOTPConsidered',
-        'Flight_otp_status':'flightLegState.isOTPFlight',
-        'Flight_type':'flightLegState.flightType',
-        'scheduled_block_time':'flightLegState.blockTimeSch',
-        'acutal_block_time':'flightLegState.blockTimeActual',
-        'start_time_offset':'flightLegState.startTimeOffset',
-        'end_time_offset':'flightLegState.endTimeOffset',
-        'passenger_count':'flightLegState.pax.passengerCount.code=',
-        """
-# --- MCP Prompts ---
-@mcp.prompt()
-def casual_instruction(style:str="casual")-> str:
-    """A prompt template for instructing the assistant in a given style."""
-    if style == "casual":
-        return "You are a friendly travel assistant. Speak casually and clearly."
-    elif style == "formal":
-        return "You are a formal travel assistant. Speak formally and clearly."
-    else:
-        return "You are a travel assistant. Speak clearly."
 
+async def _find_matching_doc_meta(query:dict, limit: int =50)->dict:
+    try:
+        _, _, col=await get_mongodb_client()
+        count=await col.count_documents(query)
+
+        proj={
+            "_id":1,
+            "flightLegState.startStation":1,
+            "flightLegState.endStation":1,
+            "flightLegState.scheduledStartTime":1,
+            "flightLegState.seqNumber":1,
+            "flightLegState.fligthStatus":1,
+        }
+        cursor = col.find(query,proj).sort("flightLegState.scheduledStartTime",1).limit(limit)
+        docs=[]
+        async for d in cursor:
+            fl = d.get("flightLegState",{})
+            docs.append({
+                "doc_id": str(d["_id"]),
+                "startStation": fl.get("startStation"),
+                "endStation": fl.get("endStation"),
+                "scheduledStartTime": fl.get("scheduledStartTime"),
+                "seqNumber": fl.get("seqNumber"),
+                "flightStatus": fl.get("flightStatus"),
+            })
+        return {"count":count,"document":docs}
+    except Exception as e:
+        logger.exception("Error in _find_matching_doc_meta")
+        return {"count":0, "documents":[],"error":str(e)}
+
+async def _get_document_by_id(doc_id:str,projection:dict=None)->Optional[dict]:
+    try:
+        _, _, col= await get_mongodb_client()
+        try:
+            oid = ObjectId(doc_id)
+        except Exception:
+            return None
+        result = await col.find_one({"_id":oid},projection or {})
+        if result:
+            result.pop("_id",None)
+            result.pop("_class",None)
+        return result
+    except Exception as e:
+        logger.exception("Error in _get_document_by_id")
+        return None
+
+        
 
 # --- MCP Tools ---
-
+@mcp.tool()
+async def get_flight_by_id(doc_id:str, projection:str = "")->str:
+    """
+    Exposed tool to fetch a single document by its ObjectId string.
+    projection: optional JOSN string for projection (e.g.'{"flightLegState.carrier":1,"_id":0}')
+    """
+    if not doc_id:
+        return response_error("doc_id is requied",400)
+    proj = None
+    if projection:
+        try:
+            proj = json.loads(projection.replace("'",'"'))
+        except Exception as e:
+            return response_error(f"Invalid projection JSON:{e}",400)
+    doc= await _get_document_by_id(doc_id,proj)
+    if not doc:
+        return response_error("Document not found",404)
+    return response_ok(doc)
 @mcp.tool()
 async def health_check() -> str:
     """
@@ -239,6 +234,10 @@ async def health_check() -> str:
     except Exception as e:
         logger.exception("Health check DB ping failed")
         return response_error("DB unreachable", code=503)
+@mcp.tool()
+async def casual_query(answer: str="")-> str:
+    "The user just asked a general query answere it on your own behalf "
+    return response_ok(answer)
 
 @mcp.tool()
 async def get_flight_basic_info(carrier: str = "", flight_number: str = "", date_of_origin: str = "") -> str:
@@ -262,34 +261,54 @@ async def get_flight_basic_info(carrier: str = "", flight_number: str = "", date
     query = make_query(carrier, fn, dob)
     
     # Project basic flight information
-    projection = {
-        "flightLegState.carrier": 1,
-        "flightLegState.flightNumber": 1,
-        "flightLegState.suffix": 1,
-        "flightLegState.dateOfOrigin": 1,
-        "flightLegState.seqNumber": 1,
-        "flightLegState.startStation": 1,
-        "flightLegState.endStation": 1,
-        "flightLegState.startStationICAO": 1,
-        "flightLegState.endStationICAO": 1,
-        "flightLegState.scheduledStartTime": 1,
-        "flightLegState.scheduledEndTime": 1,
-        "flightLegState.flightStatus": 1,
-        "flightLegState.operationalStatus": 1,
-        "flightLegState.flightType": 1,
-        "flightLegState.blockTimeSch": 1,
-        "flightLegState.blockTimeActual": 1,
-        "flightLegState.flightHoursActual": 1,
-        "flightLegState.isOTPFlight": 1,
-        "flightLegState.isOTPAchieved": 1,
-        "flightLegState.isOTPConsidered": 1,
-        "flightLegState.isOTTFlight": 1,
-        "flightLegState.isOTTAchievedFlight": 1,
-        "flightLegState.turnTimeFlightBeforeActual": 1,
-        "flightLegState.turnTimeFlightBeforeSch": 1
-    }
+    if multiple:
+        projection = {
+            "flightLegState.carrier": 1,
+            "flightLegState.flightNumber": 1,
+            "flightLegState.suffix": 1,
+            "flightLegState.dateOfOrigin": 1,
+            "flightLegState.seqNumber": 1,
+            "flightLegState.startStation": 1,
+            "flightLegState.endStation": 1,
+            "flightLegState.startStationICAO": 1,
+            "flightLegState.endStationICAO": 1,
+            "flightLegState.scheduledStartTime": 1,
+            "flightLegState.scheduledEndTime": 1,
+            "flightLegState.flightStatus": 1,
+            "flightLegState.operationalStatus": 1,
+            "flightLegState.flightType": 1,
+            "flightLegState.blockTimeSch": 1,
+            "flightLegState.blockTimeActual": 1,
+            "flightLegState.flightHoursActual": 1,
+            "flightLegState.isOTPFlight": 1,
+            "flightLegState.isOTPAchieved": 1,
+            "flightLegState.isOTPConsidered": 1,
+            "flightLegState.isOTTFlight": 1,
+            "flightLegState.isOTTAchievedFlight": 1,
+            "flightLegState.turnTimeFlightBeforeActual": 1,
+            "flightLegState.turnTimeFlightBeforeSch": 1
+        }
     
-    return await _fetch_one_async(query, projection)
+        return await _fetch_one_async(query, projection)
+    meta= await _find_matching_doc_meta(query,limit=50)
+    if meta.get("error"):
+        return response_error(f"DB error: {meta['error']}",500)
+    count = meta.get("count",0)
+    if count == 0:
+        return response_error("No matching document found.",404)
+    elif count==1:
+        doc_id=meta["document"][0]["doc_id"]
+        full_doc = await _get_document_by_id(doc_id)
+        if not full_doc:
+            return response_error("Document not found",404)
+        return response_ok(full_doc)
+    else:
+        return response_ok({
+            "needs_route_selection":True,
+            "count":count,
+            "matches":meta["documents"],
+            "original_query":query
+        })
 
 @mcp.tool()
 async def get_operation_times(carrier: str = "", flight_number: str = "", date_of_origin: str = "") -> str:
@@ -652,7 +671,7 @@ async def run_aggregated_query(
         "sum": {"$sum": f"${field}"},
         "min": {"$min": f"${field}"},
         "max": {"$max": f"${field}"},
-        "count": {"$sum": 1},
+        "count": {"$count": 1},
     }
     if query_type not in agg_map:
         return response_error(f"Unsupported query_type '{query_type}'. Use one of: average, sum, min, max, count", 400)
